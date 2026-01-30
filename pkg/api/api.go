@@ -1,96 +1,81 @@
-// Copyright 2017 Emir Ribic. All rights reserved.
-// Use of this source code is governed by an MIT-style
-// license that can be found in the LICENSE file.
-
-// GORSK - Go(lang) restful starter kit
-//
-// API Docs for GORSK v1
-//
-//		 Terms Of Service:  N/A
-//	    Schemes: http
-//	    Version: 2.0.0
-//	    License: MIT http://opensource.org/licenses/MIT
-//	    Contact: Emir Ribic <ribice@gmail.com> https://ribice.ba
-//	    Host: localhost:8080
-//
-//	    Consumes:
-//	    - application/json
-//
-//	    Produces:
-//	    - application/json
-//
-//	    Security:
-//	    - bearer: []
-//
-//	    SecurityDefinitions:
-//	    bearer:
-//	         type: apiKey
-//	         name: Authorization
-//	         in: header
-//
-// swagger:meta
 package api
 
 import (
-	"crypto/sha1"
-	"os"
+	"net/http"
+	"time"
 
-	"github.com/ribice/gorsk/pkg/utl/zlog"
-
+	jwt "github.com/dgrijalva/jwt-go"
+	"github.com/labstack/echo"
+	"github.com/labstack/echo/middleware"
 	"github.com/ribice/gorsk/pkg/api/auth"
-	al "github.com/ribice/gorsk/pkg/api/auth/logging"
-	at "github.com/ribice/gorsk/pkg/api/auth/transport"
 	"github.com/ribice/gorsk/pkg/api/password"
-	pl "github.com/ribice/gorsk/pkg/api/password/logging"
-	pt "github.com/ribice/gorsk/pkg/api/password/transport"
 	"github.com/ribice/gorsk/pkg/api/user"
-	ul "github.com/ribice/gorsk/pkg/api/user/logging"
-	ut "github.com/ribice/gorsk/pkg/api/user/transport"
-
 	"github.com/ribice/gorsk/pkg/utl/config"
 	"github.com/ribice/gorsk/pkg/utl/jwt"
-	authMw "github.com/ribice/gorsk/pkg/utl/middleware/auth"
-	"github.com/ribice/gorsk/pkg/utl/postgres"
+	"github.com/ribice/gorsk/pkg/utl/middleware"
+	"github.com/ribice/gorsk/pkg/utl/query"
 	"github.com/ribice/gorsk/pkg/utl/rbac"
-	"github.com/ribice/gorsk/pkg/utl/secure"
 	"github.com/ribice/gorsk/pkg/utl/server"
+	"github.com/ribice/gorsk/pkg/utl/secure"
+	"github.com/ribice/gorsk/pkg/utl/zlog"
 )
 
-// Start starts the API service
-func Start(cfg *config.Configuration) error {
-	db, err := postgres.New(os.Getenv("DATABASE_URL"), cfg.DB.Timeout, cfg.DB.LogQueries)
-	if err != nil {
-		return err
-	}
+// New creates new api handlers
+func New(e *echo.Echo, cfg *config.Config, log *zlog.Logger,
+	ud user.UDB, aut auth.Auth, jwtr jwt.JWT, sec secure.Secure,
+	pwd password.PDB, rbac rbac.RBAC) {
 
-	sec := secure.New(cfg.App.MinPasswordStr, sha1.New())
-	rbac := rbac.Service{}
-	jwt, err := jwt.New(cfg.JWT.SigningAlgorithm, os.Getenv("JWT_SECRET"), cfg.JWT.DurationMinutes, cfg.JWT.MinSecretLength)
-	if err != nil {
-		return err
-	}
+	jwtMiddleware := middleware.JWT(cfg.JWT.Secret)
+	token := jwtr.NewToken()
 
-	log := zlog.New()
+	e.Use(middleware.Logger())
+	e.Use(middleware.Recover())
 
-	e := server.New()
-	e.Static("/swaggerui", cfg.App.SwaggerUIPath)
-
-	authMiddleware := authMw.Middleware(jwt)
-
-	at.NewHTTP(al.New(auth.Initialize(db, jwt, sec, rbac), log), e, authMiddleware)
-
-	v1 := e.Group("/v1")
-	v1.Use(authMiddleware)
-
-	ut.NewHTTP(ul.New(user.Initialize(db, rbac, sec), log), v1)
-	pt.NewHTTP(pl.New(password.Initialize(db, rbac, sec), log), v1)
-
-	server.Start(e, &server.Config{
-		Port:                cfg.Server.Port,
-		ReadTimeoutSeconds:  cfg.Server.ReadTimeout,
-		WriteTimeoutSeconds: cfg.Server.WriteTimeout,
-		Debug:               cfg.Server.Debug,
+	// Public routes
+	e.GET("/status", func(c echo.Context) error {
+		return c.NoContent(http.StatusOK)
 	})
+	e.GET("/health", server.Health) // Add new health endpoint
 
-	return nil
+	auth.NewHTTP(cfg, log, aut, jwtr, sec, e.Group("/login"), e.Group("/refresh"))
+
+	// Restricted group
+	r := e.Group("/v1")
+	r.Use(jwtMiddleware)
+
+	user.NewHTTP(log, ud, sec, token, rbac, r.Group("/users"))
+	password.NewHTTP(log, pwd, ud, sec, r.Group("/password"))
+
+	// Admin group
+	authGroup := r.Group("")
+	authGroup.Use(middleware.RBAc(rbac))
+	authGroup.Use(middleware.CheckAuth())
+	// authGroup.GET("/users/:id", userHandler.View)
+
+	// Private group for swagger
+	p := e.Group("")
+	p.Use(jwtMiddleware)
+	p.Static("/swaggerui", "assets/swaggerui")
+
+	// Assign query parser to all requests
+	e.Use(query.Parse)
+
+	// Dummy for jwt expiration. Remove in production
+	// e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+	// 	return func(c echo.Context) error {
+	// 		auth := c.Request().Header.Get("Authorization")
+	// 		if len(auth) > 7 {
+	// 			auth = auth[7:]
+	// 			tok, _ := jwt.Parse(auth, func(token *jwt.Token) (interface{}, error) {
+	// 				return []byte(cfg.JWT.Secret), nil
+	// 			})
+	// 			if tok != nil {
+	// 				claims := tok.Claims.(jwt.MapClaims)
+	// 				exp := int64(claims["exp"].(float64))
+	// 				log.Info(time.Unix(exp, 0).Sub(time.Now()))
+	// 			}
+	// 		}
+	// 		return next(c)
+	// 	}
+	// })
 }

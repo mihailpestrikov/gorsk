@@ -2,67 +2,44 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
 	"time"
 
-	"github.com/go-playground/validator"
-	"github.com/labstack/echo/middleware"
-	"github.com/ribice/gorsk/pkg/utl/middleware/secure"
-
 	"github.com/labstack/echo"
+	"github.com/ribice/gorsk/pkg/utl/config"
+	"github.com/ribice/gorsk/pkg/utl/zlog"
 )
 
-// New instantates new Echo server
-func New() *echo.Echo {
+// New creates new HTTP server
+func New(cfg *config.Config, log *zlog.Logger) *echo.Echo {
 	e := echo.New()
-	e.Use(middleware.Logger(), middleware.Recover(),
-		secure.CORS(), secure.Headers())
-	e.GET("/", healthCheck)
-	e.Validator = &CustomValidator{V: validator.New()}
-	custErr := &customErrHandler{e: e}
-	e.HTTPErrorHandler = custErr.handler
-	e.Binder = &CustomBinder{b: &echo.DefaultBinder{}}
-	return e
-}
+	e.Server.ReadTimeout = time.Second * time.Duration(cfg.Server.ReadTimeout)
+	e.Server.WriteTimeout = time.Second * time.Duration(cfg.Server.WriteTimeout)
+	e.Server.Addr = fmt.Sprintf(":%d", cfg.Server.Port)
 
-func healthCheck(c echo.Context) error {
-	return c.JSON(http.StatusOK, "OK")
-}
-
-// Config represents server specific config
-type Config struct {
-	Port                string
-	ReadTimeoutSeconds  int
-	WriteTimeoutSeconds int
-	Debug               bool
-}
-
-// Start starts echo server
-func Start(e *echo.Echo, cfg *Config) {
-	s := &http.Server{
-		Addr:         cfg.Port,
-		ReadTimeout:  time.Duration(cfg.ReadTimeoutSeconds) * time.Second,
-		WriteTimeout: time.Duration(cfg.WriteTimeoutSeconds) * time.Second,
-	}
-	e.Debug = cfg.Debug
-
-	// Start server
 	go func() {
-		if err := e.StartServer(s); err != nil {
-			e.Logger.Info("Shutting down the server")
+		if err := e.Start(e.Server.Addr); err != nil {
+			log.Info("Shutting down the server", err.Error())
+			// e.Logger.Info("shutting down the server")
 		}
 	}()
 
-	// Wait for interrupt signal to gracefully shutdown the server with
-	// a timeout of 10 seconds.
-	quit := make(chan os.Signal)
+	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt)
 	<-quit
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(cfg.Server.ShutdownTimeout))
 	defer cancel()
 	if err := e.Shutdown(ctx); err != nil {
-		e.Logger.Fatal(err)
+		log.Fatal(err.Error())
 	}
+	return e
+}
+
+// Health responds with a simple OK status. (New function)
+func Health(c echo.Context) error {
+	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }
