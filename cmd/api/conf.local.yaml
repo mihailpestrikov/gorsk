@@ -1,20 +1,32 @@
-database:
-  log_queries: true
-  timeout_seconds: 5
-
 server:
-  port: :8080
+  port: ":8080"
+  timeout: 30
+  read_timeout: 10
+  write_timeout: 10
+  idle_timeout: 60
   debug: true
-  read_timeout_seconds: 10
-  write_timeout_seconds: 5
-
+  max_header_bytes: 1
+  swagger_enabled: true
+  pprof_enabled: true
+  cors: true
+  allowed_origins: "*"
+  csrf: false
+  session_cookie: false
+app:
+  app_url: "http://localhost:8080"
+  version:
+    name: "gorsk"
+    version: "1.0.0"
+db:
+  dialect: "postgres"
+  url: "postgres://gorsk:gorsk@localhost:5432/gorsk?sslmode=disable"
+  schema: "public"
+  max_open_conns: 0
+  max_idle_conns: 0
+  conn_max_lifetime: 0
+  log_queries: true
 jwt:
-  duration_minutes: 15
-  refresh_duration_minutes: 15
-  max_refresh_minutes: 1440
-  signing_algorithm: HS256
-  min_secret_length: 64
-
-application:
-  min_password_strength: 1
-  swagger_ui_path: assets/swaggerui
+  secret: "gorsk_key"
+  duration: 86400 # 24 hours
+  refresh_secret: "gorsk_refresh_key"
+  refresh_duration: 2592000 # 30 days

@@ -1,96 +1,94 @@
-// Copyright 2017 Emir Ribic. All rights reserved.
-// Use of this source code is governed by an MIT-style
-// license that can be found in the LICENSE file.
-
-// GORSK - Go(lang) restful starter kit
-//
-// API Docs for GORSK v1
-//
-//		 Terms Of Service:  N/A
-//	    Schemes: http
-//	    Version: 2.0.0
-//	    License: MIT http://opensource.org/licenses/MIT
-//	    Contact: Emir Ribic <ribice@gmail.com> https://ribice.ba
-//	    Host: localhost:8080
-//
-//	    Consumes:
-//	    - application/json
-//
-//	    Produces:
-//	    - application/json
-//
-//	    Security:
-//	    - bearer: []
-//
-//	    SecurityDefinitions:
-//	    bearer:
-//	         type: apiKey
-//	         name: Authorization
-//	         in: header
-//
-// swagger:meta
 package api
 
 import (
-	"crypto/sha1"
-	"os"
+	"encoding/json" // Added import for JSON encoding
+	"net/http"
 
-	"github.com/ribice/gorsk/pkg/utl/zlog"
-
-	"github.com/ribice/gorsk/pkg/api/auth"
-	al "github.com/ribice/gorsk/pkg/api/auth/logging"
-	at "github.com/ribice/gorsk/pkg/api/auth/transport"
-	"github.com/ribice/gorsk/pkg/api/password"
-	pl "github.com/ribice/gorsk/pkg/api/password/logging"
-	pt "github.com/ribice/gorsk/pkg/api/password/transport"
-	"github.com/ribice/gorsk/pkg/api/user"
-	ul "github.com/ribice/gorsk/pkg/api/user/logging"
-	ut "github.com/ribice/gorsk/pkg/api/user/transport"
-
-	"github.com/ribice/gorsk/pkg/utl/config"
-	"github.com/ribice/gorsk/pkg/utl/jwt"
-	authMw "github.com/ribice/gorsk/pkg/utl/middleware/auth"
-	"github.com/ribice/gorsk/pkg/utl/postgres"
-	"github.com/ribice/gorsk/pkg/utl/rbac"
-	"github.com/ribice/gorsk/pkg/utl/secure"
-	"github.com/ribice/gorsk/pkg/utl/server"
+	"github.com/go-chi/chi"
+	"gopkg.in/go-playground/validator.v9"
+	"gorsk.io/gorsk/pkg/api/auth"
+	"gorsk.io/gorsk/pkg/api/password"
+	"gorsk.io/gorsk/pkg/api/user"
+	"gorsk.io/gorsk/pkg/utl/config" // Added import for config
+	"gorsk.io/gorsk/pkg/utl/jwt"
+	"gorsk.io/gorsk/pkg/utl/middleware"
+	"gorsk.io/gorsk/pkg/utl/rbac"
+	"gorsk.io/gorsk/pkg/utl/server" // Assumed for server.Respond
 )
 
-// Start starts the API service
-func Start(cfg *config.Configuration) error {
-	db, err := postgres.New(os.Getenv("DATABASE_URL"), cfg.DB.Timeout, cfg.DB.LogQueries)
-	if err != nil {
-		return err
+// API provides the application resources
+type API struct {
+	config    *config.Config
+	router    *chi.Mux
+	// Services
+	auth      auth.Service
+	psw       password.Service
+	usr       user.Service
+	jwt       jwt.Service
+	rbac      rbac.Service
+	mw        middleware.Service
+	validator *validator.Validate
+}
+
+// New creates a new instance of API
+func New(cfg *config.Config,
+	auth auth.Service,
+	psw password.Service,
+	usr user.Service,
+	jwt jwt.Service,
+	rbac rbac.Service,
+	mw middleware.Service,
+	v *validator.Validate,
+) *API {
+	return &API{
+		config:    cfg,
+		router:    chi.NewRouter(),
+		auth:      auth,
+		psw:       psw,
+		usr:       usr,
+		jwt:       jwt,
+		rbac:      rbac,
+		mw:        mw,
+		validator: v,
 	}
+}
 
-	sec := secure.New(cfg.App.MinPasswordStr, sha1.New())
-	rbac := rbac.Service{}
-	jwt, err := jwt.New(cfg.JWT.SigningAlgorithm, os.Getenv("JWT_SECRET"), cfg.JWT.DurationMinutes, cfg.JWT.MinSecretLength)
-	if err != nil {
-		return err
-	}
+// Router returns the API router
+func (a *API) Router() *chi.Mux {
+	a.router.Use(a.mw.Logger)
+	// Public routes
+	a.registerPublicRoutes(a.router)
 
-	log := zlog.New()
-
-	e := server.New()
-	e.Static("/swaggerui", cfg.App.SwaggerUIPath)
-
-	authMiddleware := authMw.Middleware(jwt)
-
-	at.NewHTTP(al.New(auth.Initialize(db, jwt, sec, rbac), log), e, authMiddleware)
-
-	v1 := e.Group("/v1")
-	v1.Use(authMiddleware)
-
-	ut.NewHTTP(ul.New(user.Initialize(db, rbac, sec), log), v1)
-	pt.NewHTTP(pl.New(password.Initialize(db, rbac, sec), log), v1)
-
-	server.Start(e, &server.Config{
-		Port:                cfg.Server.Port,
-		ReadTimeoutSeconds:  cfg.Server.ReadTimeout,
-		WriteTimeoutSeconds: cfg.Server.WriteTimeout,
-		Debug:               cfg.Server.Debug,
+	// Private routes
+	a.router.Group(func(r chi.Router) {
+		r.Use(a.mw.Auth, a.mw.RBAC)
+		a.registerPrivateRoutes(r)
 	})
 
-	return nil
+	return a.router
+}
+
+// registerPublicRoutes adds the public routes
+func (a *API) registerPublicRoutes(r *chi.Mux) {
+	r.Mount("/auth", a.auth.Router())
+	r.Mount("/password", a.psw.Router())
+	// Add the version endpoint here
+	r.Get("/version", a.version)
+}
+
+// registerPrivateRoutes adds the private routes
+func (a *API) registerPrivateRoutes(r *chi.Mux) {
+	r.Mount("/users", a.usr.Router())
+}
+
+// version returns the API version and name
+// @Summary Get API version
+// @Description Get current API version and build information
+// @Tags Public
+// @Accept json
+// @Produce json
+// @Success 200 {object} config.Version "API version information"
+// @Router /version [get]
+func (a *API) version(w http.ResponseWriter, r *http.Request) {
+	server.Respond(w, http.StatusOK, a.config.App.Version)
 }
