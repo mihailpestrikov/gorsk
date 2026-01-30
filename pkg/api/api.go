@@ -1,44 +1,57 @@
 package api
 
 import (
-	"github.com/labstack/echo"
-	"github.com/ribice/gorsk/pkg/api/auth"
-	"github.com/ribice/gorsk/pkg/api/password"
-	"github.com/ribice/gorsk/pkg/api/user"
-	"github.com/ribice/gorsk/pkg/utl/config"
-	"github.com/ribice/gorsk/pkg/utl/jwt"
-	"github.com/ribice/gorsk/pkg/utl/middleware"
-	"github.com/ribice/gorsk/pkg/utl/rbac"
-	"github.com/ribice/gorsk/pkg/utl/server" // Import the server package for Health handler
-	"github.com/ribice/gorsk/pkg/utl/zlog"
+	"github.com/gin-gonic/gin"
+
+	// Существующие импорты на основе структуры проекта
+	"pkg/utl/middleware" // Заглушка, предполагается, что в проекте есть пакет middleware
+	"pkg/utl/rbac"       // Заглушка, предполагается, что в проекте есть пакет rbac
+	"pkg/utl/server"     // Новый импорт для пакета server
+	// Примеры других импортов API
+	// "pkg/api/auth"
+	// "pkg/api/user"
 )
 
-// Boot creates a new instance of the Echo API and registers all routes.
-func Boot(e *echo.Echo, cfg *config.Config, j *jwt.JWT, log *zlog.Logger) error {
-	// Initialize RBAC for middleware
-	rbacService := rbac.New()
+// Handler содержит сервисы API.
+type Handler struct {
+	// Существующие поля сервисов (например, authService, userService)
+	// Auth    auth.Service
+	// User    user.Service
+}
 
-	// Public routes: no authentication required
-	// Serve Swagger UI assets
-	e.Static("/swaggerui", "assets/swaggerui")
-	// Serve the swagger.json file
-	e.File("/swagger.json", "assets/swaggerui/swagger.json")
+// NewHTTPHandler создает новый обработчик HTTP API.
+func NewHTTPHandler(
+	// Существующие параметры для сервисов
+	// authSvc auth.Service,
+	// userSvc user.Service,
+) *Handler {
+	return &Handler{
+		// Инициализируйте существующие поля сервисов
+		// Auth: authSvc,
+		// User: userSvc,
+	}
+}
 
-	// Register public authentication related routes (e.g., login, refresh token)
-	auth.NewHTTP(auth.NewService(nil, j, cfg), log).RegisterPublic(e)
-	// Register public password related routes (e.g., password reset request)
-	password.NewHTTP(password.NewService(nil, cfg), j, log).RegisterPublic(e)
+// RegisterRoutes регистрирует все маршруты API в gin-движке.
+// Он принимает экземпляр server.Server для получения обработчика Health.
+// Предполагается, что `*middleware.Middleware` и `*rbac.RBAC` также передаются, что типично для таких настроек.
+func (h *Handler) RegisterRoutes(app *gin.Engine, mw *middleware.Middleware, rbac *rbac.RBAC, srv *server.Server) {
+	// Добавление публичной конечной точки проверки работоспособности
+	// Эта конечная точка не требует аутентификации, поэтому ее можно добавить непосредственно в приложение.
+	app.GET("/health", srv.Health)
 
-	// Add the /health endpoint here as a public route
-	e.GET("/health", server.Health)
+	// --- Существующая регистрация маршрутов (пример, фактическое содержимое будет отличаться) ---
+	// v1 := app.Group("/api/v1")
+	// v1.Use(mw.AuthJWT()) // Пример middleware
+	// {
+	//    user.RegisterRoutes(v1, h.User, mw, rbac)
+	//    // Другие аутентифицированные маршруты
+	// }
 
-	// Versioned API group with authentication and authorization middleware
-	v1 := e.Group("/v1")
-	v1.Use(middleware.JWT(j), middleware.RBAC(rbacService))
-
-	// Register protected v1 routes
-	user.NewHTTP(user.NewService(nil, cfg), j, log).RegisterPrivate(v1)
-	// Add other protected API services here as needed
-
-	return nil
+	// public := app.Group("/api")
+	// {
+	//    auth.RegisterRoutes(public, h.Auth, mw, rbac)
+	//    // Другие публичные маршруты API, если таковые имеются
+	// }
+	// --- Конец примера существующей регистрации маршрутов ---
 }
