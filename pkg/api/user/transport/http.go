@@ -2,274 +2,120 @@ package transport
 
 import (
 	"net/http"
-	"strconv"
 
-	"github.com/ribice/gorsk"
-	"github.com/ribice/gorsk/pkg/api/user"
-
-	"github.com/labstack/echo"
+	"github.com/gin-gonic/gin"
+	"go-rest-api/pkg/api/user"
+	"go-rest-api/pkg/utl/config"
+	"go-rest-api/pkg/utl/middleware"
 )
 
-// HTTP represents user http service
 type HTTP struct {
 	svc user.Service
+	mw  *middleware.Middleware
+	cfg *config.Config // Add config field
 }
 
 // NewHTTP creates new user http service
-func NewHTTP(svc user.Service, r *echo.Group) {
-	h := HTTP{svc}
-	ur := r.Group("/users")
-	// swagger:route POST /v1/users users userCreate
-	// Creates new user account.
-	// responses:
-	//  200: userResp
-	//  400: errMsg
-	//  401: err
-	//  403: errMsg
-	//  500: err
-	ur.POST("", h.create)
+func NewHTTP(svc user.Service, mw *middleware.Middleware, r *gin.RouterGroup, cfg *config.Config) {
+	h := HTTP{svc, mw, cfg} // Initialize cfg
 
-	// swagger:operation GET /v1/users users listUsers
-	// ---
-	// summary: Returns list of users.
-	// description: Returns list of users. Depending on the user role requesting it, it may return all users for SuperAdmin/Admin users, all company/location users for Company/Location admins, and an error for non-admin users.
-	// parameters:
-	// - name: limit
-	//   in: query
-	//   description: number of results
-	//   type: int
-	//   required: false
-	// - name: page
-	//   in: query
-	//   description: page number
-	//   type: int
-	//   required: false
-	// responses:
-	//   "200":
-	//     "$ref": "#/responses/userListResp"
-	//   "400":
-	//     "$ref": "#/responses/errMsg"
-	//   "401":
-	//     "$ref": "#/responses/err"
-	//   "403":
-	//     "$ref": "#/responses/err"
-	//   "500":
-	//     "$ref": "#/responses/err"
-	ur.GET("", h.list)
-
-	// swagger:operation GET /v1/users/{id} users getUser
-	// ---
-	// summary: Returns a single user.
-	// description: Returns a single user by its ID.
-	// parameters:
-	// - name: id
-	//   in: path
-	//   description: id of user
-	//   type: int
-	//   required: true
-	// responses:
-	//   "200":
-	//     "$ref": "#/responses/userResp"
-	//   "400":
-	//     "$ref": "#/responses/err"
-	//   "401":
-	//     "$ref": "#/responses/err"
-	//   "403":
-	//     "$ref": "#/responses/err"
-	//   "404":
-	//     "$ref": "#/responses/err"
-	//   "500":
-	//     "$ref": "#/responses/err"
-	ur.GET("/:id", h.view)
-
-	// swagger:operation PATCH /v1/users/{id} users userUpdate
-	// ---
-	// summary: Updates user's contact information
-	// description: Updates user's contact information -> first name, last name, mobile, phone, address.
-	// parameters:
-	// - name: id
-	//   in: path
-	//   description: id of user
-	//   type: int
-	//   required: true
-	// - name: request
-	//   in: body
-	//   description: Request body
-	//   required: true
-	//   schema:
-	//     "$ref": "#/definitions/userUpdate"
-	// responses:
-	//   "200":
-	//     "$ref": "#/responses/userResp"
-	//   "400":
-	//     "$ref": "#/responses/errMsg"
-	//   "401":
-	//     "$ref": "#/responses/err"
-	//   "403":
-	//     "$ref": "#/responses/err"
-	//   "500":
-	//     "$ref": "#/responses/err"
-	ur.PATCH("/:id", h.update)
-
-	// swagger:operation DELETE /v1/users/{id} users userDelete
-	// ---
-	// summary: Deletes a user
-	// description: Deletes a user with requested ID.
-	// parameters:
-	// - name: id
-	//   in: path
-	//   description: id of user
-	//   type: int
-	//   required: true
-	// responses:
-	//   "200":
-	//     "$ref": "#/responses/ok"
-	//   "400":
-	//     "$ref": "#/responses/err"
-	//   "401":
-	//     "$ref": "#/responses/err"
-	//   "403":
-	//     "$ref": "#/responses/err"
-	//   "500":
-	//     "$ref": "#/responses/err"
-	ur.DELETE("/:id", h.delete)
+	r.POST("/users", h.create)
+	r.GET("/users", h.mw.AuthMiddleware(), h.mw.RbacMiddleware(user.ListRoles), h.list)
+	r.GET("/users/:id", h.mw.AuthMiddleware(), h.mw.RbacMiddleware(user.ViewRoles), h.view)
+	r.PUT("/users/:id", h.mw.AuthMiddleware(), h.mw.RbacMiddleware(user.EditRoles), h.update)
+	r.DELETE("/users/:id", h.mw.AuthMiddleware(), h.mw.RbacMiddleware(user.DeleteRoles), h.delete)
 }
 
-// Custom errors
-var (
-	ErrPasswordsNotMaching = echo.NewHTTPError(http.StatusBadRequest, "passwords do not match")
-)
-
-// User create request
-// swagger:model userCreate
-type createReq struct {
-	FirstName       string `json:"first_name" validate:"required"`
-	LastName        string `json:"last_name" validate:"required"`
-	Username        string `json:"username" validate:"required,min=3,alphanum"`
-	Password        string `json:"password" validate:"required,min=8"`
-	PasswordConfirm string `json:"password_confirm" validate:"required"`
-	Email           string `json:"email" validate:"required,email"`
-
-	CompanyID  int              `json:"company_id" validate:"required"`
-	LocationID int              `json:"location_id" validate:"required"`
-	RoleID     gorsk.AccessRole `json:"role_id" validate:"required"`
+type createUserReq struct {
+	Username    string `json:"username" binding:"required,min=4"`
+	Email       string `json:"email" binding:"required,email"`	
+	Password    string `json:"password" binding:"required"` // Removed min=8 binding
+	FirstName   string `json:"first_name"`
+	LastName    string `json:"last_name"`
+	PhoneNumber string `json:"phone_number"`
+	Address     string `json:"address"`
 }
 
-func (h HTTP) create(c echo.Context) error {
-	r := new(createReq)
+func (h *HTTP) create(c *gin.Context) {
+	req := new(createUserReq)
 
-	if err := c.Bind(r); err != nil {
-
-		return err
+	if err := c.BindJSON(req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
 
-	if r.Password != r.PasswordConfirm {
-		return ErrPasswordsNotMaching
+	// Manual password length validation using the configured value
+	if len(req.Password) < h.cfg.MinPasswordLength {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "password is too short"})
+		return
 	}
 
-	if r.RoleID < gorsk.SuperAdminRole || r.RoleID > gorsk.UserRole {
-		return gorsk.ErrBadRequest
-	}
-
-	usr, err := h.svc.Create(c, gorsk.User{
-		Username:   r.Username,
-		Password:   r.Password,
-		Email:      r.Email,
-		FirstName:  r.FirstName,
-		LastName:   r.LastName,
-		CompanyID:  r.CompanyID,
-		LocationID: r.LocationID,
-		RoleID:     r.RoleID,
-	})
+	res, err := h.svc.Create(c, user.User{Username: req.Username, Email: req.Email, Password: req.Password, FirstName: req.FirstName, LastName: req.LastName, PhoneNumber: req.PhoneNumber, Address: req.Address})
 
 	if err != nil {
-		return err
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
 	}
 
-	return c.JSON(http.StatusOK, usr)
+	c.JSON(http.StatusCreated, res)
 }
 
-type listResponse struct {
-	Users []gorsk.User `json:"users"`
-	Page  int          `json:"page"`
-}
-
-func (h HTTP) list(c echo.Context) error {
-	var req gorsk.PaginationReq
-	if err := c.Bind(&req); err != nil {
-		return err
-	}
-
-	result, err := h.svc.List(c, req.Transform())
-
-	if err != nil {
-		return err
-	}
-
-	return c.JSON(http.StatusOK, listResponse{result, req.Page})
-}
-
-func (h HTTP) view(c echo.Context) error {
-	id, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
-		return gorsk.ErrBadRequest
-	}
-
-	result, err := h.svc.View(c, id)
-	if err != nil {
-		return err
-	}
-
-	return c.JSON(http.StatusOK, result)
-}
-
-// User update request
-// swagger:model userUpdate
 type updateReq struct {
-	ID        int    `json:"-"`
-	FirstName string `json:"first_name,omitempty" validate:"omitempty,min=2"`
-	LastName  string `json:"last_name,omitempty" validate:"omitempty,min=2"`
-	Mobile    string `json:"mobile,omitempty"`
-	Phone     string `json:"phone,omitempty"`
-	Address   string `json:"address,omitempty"`
+	FirstName   string `json:"first_name"`
+	LastName    string `json:"last_name"`
+	PhoneNumber string `json:"phone_number"`
+	Address     string `json:"address"`
 }
 
-func (h HTTP) update(c echo.Context) error {
-	id, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
-		return gorsk.ErrBadRequest
-	}
-
+func (h *HTTP) update(c *gin.Context) {
 	req := new(updateReq)
-	if err := c.Bind(req); err != nil {
-		return err
+
+	if err := c.BindJSON(req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
 
-	usr, err := h.svc.Update(c, user.Update{
-		ID:        id,
-		FirstName: req.FirstName,
-		LastName:  req.LastName,
-		Mobile:    req.Mobile,
-		Phone:     req.Phone,
-		Address:   req.Address,
-	})
+	res, err := h.svc.Update(c, c.Param("id"), user.User{FirstName: req.FirstName, LastName: req.LastName, PhoneNumber: req.PhoneNumber, Address: req.Address})
 
 	if err != nil {
-		return err
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
 	}
 
-	return c.JSON(http.StatusOK, usr)
+	c.JSON(http.StatusOK, res)
 }
 
-func (h HTTP) delete(c echo.Context) error {
-	id, err := strconv.Atoi(c.Param("id"))
+func (h *HTTP) list(c *gin.Context) {
+	// p := c.MustGet("pagination").(*utl.Pagination)
+
+	res, err := h.svc.List(c)
+
 	if err != nil {
-		return gorsk.ErrBadRequest
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
 	}
 
-	if err := h.svc.Delete(c, id); err != nil {
-		return err
+	c.JSON(http.StatusOK, res)
+}
+
+func (h *HTTP) view(c *gin.Context) {
+	res, err := h.svc.View(c, c.Param("id"))
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
 	}
 
-	return c.NoContent(http.StatusOK)
+	c.JSON(http.StatusOK, res)
+}
+
+func (h *HTTP) delete(c *gin.Context) {
+	err := h.svc.Delete(c, c.Param("id"))
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "User deleted successfully"})
 }
