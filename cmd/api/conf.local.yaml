@@ -1,20 +1,17 @@
-database:
-  log_queries: true
-  timeout_seconds: 5
+server_port: :8080
+debug: true
+read_timeout_seconds: 5
+write_timeout_seconds: 10
+min_password_length: 8
 
-server:
-  port: :8080
-  debug: true
-  read_timeout_seconds: 10
-  write_timeout_seconds: 5
+db_host: localhost
+db_port: 5432
+db_user: postgres
+db_password: postgres
+db_name: go_rest_api
+db_schema: public
+ssl_mode: disable
 
-jwt:
-  duration_minutes: 15
-  refresh_duration_minutes: 15
-  max_refresh_minutes: 1440
-  signing_algorithm: HS256
-  min_secret_length: 64
-
-application:
-  min_password_strength: 1
-  swagger_ui_path: assets/swaggerui
+jwt_secret_key: "supersecretkey"
+jwt_access_token_life_span: 15
+jwt_refresh_token_life_span: 1440
