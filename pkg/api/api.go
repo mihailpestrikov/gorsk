@@ -1,68 +1,57 @@
 package api
 
 import (
-	"github.com/go-chi/chi/v5" // Assuming chi router is used
-	"github.com/ribice/gorsk/pkg/api/auth"
-	"github.com/ribice/gorsk/pkg/api/password"
-	"github.com/ribice/gorsk/pkg/api/user"
-	authMW "github.com/ribice/gorsk/pkg/utl/middleware/auth"   // Correct specific auth middleware import
-	secureMW "github.com/ribice/gorsk/pkg/utl/middleware/secure" // Correct specific secure middleware import
-	"github.com/ribice/gorsk/pkg/utl/server" // Import the server package for the Health handler
+	"module_path_placeholder/pkg/utl/server" // <<< REPLACE 'module_path_placeholder' with your actual Go module path, e.g., 'github.com/your-org/your-repo'
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"net/http" // Potentially needed for serving static files like Swagger UI
+	// Add any other existing imports here
 )
 
-// Option represents a functional option
-type Option func(*API)
-
-// API represents the API structure
-type API struct {
-	Auth   auth.Service
-	Pass   password.Service
-	User   user.Service
+// API represents the application's API handlers and dependencies.
+// This struct might exist to hold services, configurations, etc.
+// Add any existing fields here.
+type API {
+	// Example:
+	// Config *config.Config
+	// Auth   auth.Service
+	// User   user.Service
 }
 
-// New creates new api struct
-func New(opts ...Option) *API {
-	api := &API{}
-	for _, opt := range opts {
-		opt(api)
-	}
-	return api
-}
+// NewRouter sets up all application routes and returns a configured chi.Router.
+// This function might take dependencies for the handlers (e.g., *API instance).
+func NewRouter(api *API /*, add any other existing dependencies here */) *chi.Mux {
+	r := chi.NewRouter()
 
-// RegisterRoutes registers all application routes
-func RegisterRoutes(r chi.Router, api *API) {
-	// Add the public health check endpoint
-	r.Get("/health", server.Health)
+	// Apply common middlewares (assuming these are already in place)
+	r.Use(middleware.RequestID)
+	r.Use(middleware.RealIP)
+	r.Use(middleware.Logger)
+	r.Use(middleware.Recoverer)
 
-	// Existing base middleware (if any) could be applied here
-	r.Use(secureMW.Headers) // Example, assuming secure middleware is used
-
-	// Group for authenticated routes
+	// Public routes - accessible without authentication
 	r.Group(func(r chi.Router) {
-		r.Use(authMW.Authenticate) // Apply authentication middleware
-		auth.Routes(r, api.Auth)
-		password.Routes(r, api.Pass)
-		user.Routes(r, api.User)
+		// Health check endpoint
+		r.Get("/health", server.Health)
+
+		// Add any other existing public routes here, e.g.:
+		// r.Post("/login", api.Auth.LoginHandler)
+		// r.Get("/swagger/*", http.StripPrefix("/swagger", http.FileServer(http.Dir("./assets/swaggerui"))))
 	})
+
+	// Authenticated routes - require authentication (example)
+	// Uncomment and populate if your application has authenticated routes
+	/*
+	r.Group(func(r chi.Router) {
+		r.Use(api.Auth.VerifyTokenMiddleware) // Assuming an authentication middleware
+		// Add any existing authenticated routes here, e.g.:
+		// r.Get("/users", api.User.ListHandler)
+		// r.Post("/users", api.User.CreateHandler)
+	})
+	*/
+
+	return r
 }
 
-// WithAuthService is a functional option for Auth service
-func WithAuthService(s auth.Service) Option {
-	return func(api *API) {
-		api.Auth = s
-	}
-}
-
-// WithPasswordService is a functional option for Password service
-func WithAuthService(s password.Service) Option {
-	return func(api *API) {
-		api.Pass = s
-	}
-}
-
-// WithUserService is a functional option for User service
-func WithUserService(s user.Service) Option {
-	return func(api *API) {
-		api.User = s
-	}
-}
+// Add any other existing functions or methods in api.go below this line.
