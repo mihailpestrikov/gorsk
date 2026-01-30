@@ -1,20 +1,26 @@
-database:
-  log_queries: true
-  timeout_seconds: 5
+# config/conf.local.yaml
+port: "8080"
+env: "development"
+log_file: "app.log"
+log_http: true
 
-server:
-  port: :8080
-  debug: true
-  read_timeout_seconds: 10
-  write_timeout_seconds: 5
+database:
+  type: "postgres"
+  host: "localhost"
+  port: 5432
+  user: "user"
+  password: "password"
+  name: "db_name"
+  ssl_mode: "disable"
 
 jwt:
-  duration_minutes: 15
-  refresh_duration_minutes: 15
-  max_refresh_minutes: 1440
-  signing_algorithm: HS256
-  min_secret_length: 64
+  secret: "your-jwt-secret"
+  duration: "1h"
+  refresh: "24h"
+  max_refresh: "720h"
 
-application:
-  min_password_strength: 1
-  swagger_ui_path: assets/swaggerui
+read_timeout: "5s"
+write_timeout: "10s"
+grace_timeout: "5s"
+
+min_password_length: 8
