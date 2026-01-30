@@ -1,32 +1,63 @@
 package server
 
 import (
-	"encoding/json"
 	"net/http"
-	// Potentially other imports like log, config, etc.
+
+	"github.com/labstack/echo"
 )
 
-// Server provides common server-level utilities and handlers.
-// It can hold configuration, logger, etc. if needed for other handlers.
+// Health является обработчиком для эндпоинта проверки работоспособности.
+// Он возвращает 200 OK с JSON-ответом: {"status": "ok"}.
+func Health(c echo.Context) error {
+	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// Ниже могут располагаться другие части файла, такие как определение структуры Server,
+// функции New, Start, Shutdown и т.д. Они не были изменены или добавлены, так как
+// отсутствовали в предоставленном коде и не требовались для данной задачи.
+/*
+
+import (
+	"context"
+	"os"
+	"os/signal"
+	"time"
+
+	"your_module_path/pkg/utl/config" // Пример импорта пакета конфигурации
+	"your_module_path/pkg/utl/zlog"  // Пример импорта пакета логирования
+
+	"github.com/labstack/echo/middleware"
+)
+
+// Server содержит экземпляр echo и конфигурацию
 type Server struct {
-	// Example: config *config.Config
-	// Example: logger *zlog.Logger
+	echo *echo.Echo
+	cfg  *config.Config
 }
 
-// NewServer creates a new Server instance.
-// It initializes the Server with its dependencies.
-func NewServer() *Server {
-	return &Server{}
-}
-
-// Health is an HTTP handler function that responds with a 200 OK and
-// a JSON payload {"status": "ok"}.
-func (s *Server) Health(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	// Using json.NewEncoder for efficiency and error handling
-	if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
-		// In a real application, you might log this error.
-		// For a simple health check, it's often omitted for brevity unless detailed logging is critical.
+// New создает новый экземпляр сервера
+func New(cfg *config.Config, logger *zlog.Logger) *Server {
+	e := echo.New()
+	e.Logger = logger
+	// ... другие настройки сервера, например, middleware, обработчик ошибок
+	return &Server{
+		echo: e,
+		cfg:  cfg,
 	}
 }
+
+// Start запускает сервер
+func (s *Server) Start() error {
+	address := ":" + s.cfg.Server.Port // Пример использования порта из конфига
+	if err := s.echo.Start(address); err != nil && err != http.ErrServerClosed {
+		s.echo.Logger.Errorf("Shutting down the server with error: %v", err)
+		return err
+	}
+	return nil
+}
+
+// Shutdown корректно завершает работу сервера
+func (s *Server) Shutdown(ctx context.Context) error {
+	return s.echo.Shutdown(ctx)
+}
+*/

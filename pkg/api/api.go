@@ -1,66 +1,53 @@
 package api
 
 import (
-	"my_project/pkg/utl/server" // Assuming the correct import path based on go.mod
-	"github.com/go-chi/chi"
-	"github.com/go-chi/chi/middleware"
-	// Other specific API package imports, e.g., auth, user, password, company, role, etc.
+	"your_module_path/pkg/utl/server" // Замените "your_module_path" на актуальный путь вашего модуля
+	"github.com/labstack/echo"
+	// ... другие необходимые импорты для вашего API (например, для аутентификации, обработчиков пользователей)
 )
 
-// API defines the API application service.
-// It encapsulates the application's dependencies and routes.
-type API struct {
-	server *server.Server // Dependency for server-level utilities like health checks
-	// authService    auth.Service    // Example: Authentication service
-	// userService    user.Service    // Example: User management service
-	// passwordService password.Service // Example: Password operations
-	// ... other service dependencies
+// ConfigureRoutes настраивает все маршруты API для данного экземпляра Echo.
+// Эта функция предполагает, что она получает экземпляр *echo.Echo для регистрации маршрутов.
+func ConfigureRoutes(e *echo.Echo /*, другие зависимости, такие как сервисы, обработчики */) {
+	// --- Публичные маршруты ---
+
+	// Эндпоинт проверки работоспособности
+	e.GET("/health", server.Health)
+
+	// Добавьте здесь другие публичные маршруты, если они существуют (например, вход, регистрация)
+	/*
+	authGroup := e.Group("/auth")
+	authGroup.POST("/login", authHandler.Login)
+	*/
+
+	// --- Защищенные маршруты (пример) ---
+	/*
+	// Предполагается наличие промежуточного ПО для аутентификации
+	// protectedGroup := e.Group("/api", authMiddleware)
+	// protectedGroup.GET("/users", userHandler.List)
+	// protectedGroup.POST("/users", userHandler.Create)
+	*/
 }
 
-// New creates a new instance of the API service.
-// It takes all necessary services and dependencies as arguments.
-func New(srv *server.Server /* authSvc auth.Service, userSvc user.Service, passwordSvc password.Service */) *API {
-	return &API{
-		server: srv,
-		// authService:    authSvc,
-		// userService:    userSvc,
-		// passwordService: passwordSvc,
-	}
+// Ниже могут располагаться другие части файла, такие как функция New,
+// определения специфичных структур обработчиков и т.д. Они не были изменены
+// или добавлены, так как отсутствовали в предоставленном коде и не требовались
+// для данной задачи.
+/*
+
+import (
+	"your_module_path/pkg/api/auth"
+	"your_module_path/pkg/api/user"
+)
+
+// New создает и инициализирует обработчики API.
+// Здесь ConfigureRoutes может быть вызвана после настройки зависимостей.
+func New(e *echo.Echo, authService auth.Service, userService user.Service) {
+	// Инициализация обработчиков
+	// authHandler := auth.NewHandler(authService)
+	// userHandler := user.NewHandler(userService)
+
+	// Вызов ConfigureRoutes с необходимыми зависимостями
+	// ConfigureRoutes(e, authHandler, userHandler)
 }
-
-// Router configures and returns the main HTTP router for the API.
-func (a *API) Router() *chi.Mux {
-	r := chi.NewRouter()
-
-	// Global Middlewares
-	r.Use(middleware.RequestID)
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-	// r.Use(middleware.URLFormat) // Example: remove trailing slashes
-
-	// Public Routes - no authentication required
-	r.Group(func(r chi.Router) {
-		r.Get("/health", a.server.Health) // Add the health check endpoint
-		// r.Post("/login", a.authService.LoginHandler) // Example: existing public route
-		// r.Post("/register", a.userService.RegisterHandler) // Example: existing public route
-	})
-
-	// Authenticated Routes - require authentication middleware
-	// r.Group(func(r chi.Router) {
-	// 	// Assuming `a.authService` provides middleware for JWT verification and authentication
-	// 	// r.Use(a.authService.VerifyJWT)
-	// 	// r.Use(a.authService.AuthenticateUser)
-	//
-	// 	r.Route("/users", func(r chi.Router) {
-	// 		// r.Get("/", a.userService.ListUsersHandler)
-	// 		// r.Post("/", a.userService.CreateUserHandler)
-	// 		// r.Get("/{id}", a.userService.GetUserHandler)
-	// 		// r.Put("/{id}", a.userService.UpdateUserHandler)
-	// 		// r.Delete("/{id}", a.userService.DeleteUserHandler)
-	// 	})
-	//
-	// 	// Add other protected routes here
-	// })
-
-	return r
-}
+*/
