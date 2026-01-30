@@ -2,67 +2,56 @@ package server
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 
-	"github.com/go-playground/validator"
-	"github.com/labstack/echo/middleware"
-	"github.com/ribice/gorsk/pkg/utl/middleware/secure"
-
-	"github.com/labstack/echo"
+	"github.com/gin-gonic/gin"
 )
 
-// New instantates new Echo server
-func New() *echo.Echo {
-	e := echo.New()
-	e.Use(middleware.Logger(), middleware.Recover(),
-		secure.CORS(), secure.Headers())
-	e.GET("/", healthCheck)
-	e.Validator = &CustomValidator{V: validator.New()}
-	custErr := &customErrHandler{e: e}
-	e.HTTPErrorHandler = custErr.handler
-	e.Binder = &CustomBinder{b: &echo.DefaultBinder{}}
-	return e
+type Server struct {
+	*http.Server
 }
 
-func healthCheck(c echo.Context) error {
-	return c.JSON(http.StatusOK, "OK")
-}
-
-// Config represents server specific config
-type Config struct {
-	Port                string
-	ReadTimeoutSeconds  int
-	WriteTimeoutSeconds int
-	Debug               bool
-}
-
-// Start starts echo server
-func Start(e *echo.Echo, cfg *Config) {
-	s := &http.Server{
-		Addr:         cfg.Port,
-		ReadTimeout:  time.Duration(cfg.ReadTimeoutSeconds) * time.Second,
-		WriteTimeout: time.Duration(cfg.WriteTimeoutSeconds) * time.Second,
+func NewServer(router *gin.Engine, port string) *Server {
+	srv := &http.Server{
+		Addr:    ":" + port,
+		Handler: router,
 	}
-	e.Debug = cfg.Debug
 
-	// Start server
+	return &Server{srv}
+}
+
+func (srv *Server) Start() {
+	log.Printf("Listening on %s\n", srv.Addr)
 	go func() {
-		if err := e.StartServer(s); err != nil {
-			e.Logger.Info("Shutting down the server")
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("listen: %s\n", err)
 		}
 	}()
+}
 
-	// Wait for interrupt signal to gracefully shutdown the server with
-	// a timeout of 10 seconds.
-	quit := make(chan os.Signal)
-	signal.Notify(quit, os.Interrupt)
+func (srv *Server) WaitForShutdown(timeout time.Duration) {
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+
+	log.Println("Shutting down server...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	if err := e.Shutdown(ctx); err != nil {
-		e.Logger.Fatal(err)
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatal("Server forced to shutdown:", err)
 	}
+
+	log.Println("Server exiting")
+}
+
+// Health returns the API status
+func Health(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
