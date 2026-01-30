@@ -1,274 +1,173 @@
 package transport
 
 import (
+	"fmt"
 	"net/http"
-	"strconv"
 
-	"github.com/ribice/gorsk"
-	"github.com/ribice/gorsk/pkg/api/user"
-
-	"github.com/labstack/echo"
+	"github.com/labstack/echo/v4"
+	"github.com/ribice/gorsk/pkg/api/user/service"
+	"github.com/ribice/gorsk/pkg/utl/config"
+	"github.com/ribice/gorsk/pkg/utl/middleware"
+	"github.com/ribice/gorsk/pkg/utl/model"
+	"github.com/ribice/gorsk/pkg/utl/zlog"
 )
 
-// HTTP represents user http service
-type HTTP struct {
-	svc user.Service
-}
+type ( // Request and response structures
+	// Create request
+	create struct {
+		Username  string        `json:"username" validate:"required,min=4,max=50"`
+		Password  string        `json:"password" validate:"required,max=250"`
+		FirstName string        `json:"first_name" validate:"required,min=2,max=50"`
+		LastName  string        `json:"last_name" validate:"required,min=2,max=50"`
+		Address   string        `json:"address" validate:"required,min=2,max=250"`
+		Phone     string        `json:"phone" validate:"required,min=2,max=50"`
+		Email     string        `json:"email" validate:"required,email"`
+		Roles     []model.UserRole `json:"roles" validate:"required,min=1"`
+	}
 
-// NewHTTP creates new user http service
-func NewHTTP(svc user.Service, r *echo.Group) {
-	h := HTTP{svc}
-	ur := r.Group("/users")
-	// swagger:route POST /v1/users users userCreate
-	// Creates new user account.
-	// responses:
-	//  200: userResp
-	//  400: errMsg
-	//  401: err
-	//  403: errMsg
-	//  500: err
-	ur.POST("", h.create)
+	// Update request
+	update struct {
+		ID        int           `json:"id" validate:"required,min=1"`
+		FirstName string        `json:"first_name" validate:"required,min=2,max=50"`
+		LastName  string        `json:"last_name" validate:"required,min=2,max=50"`
+		Address   string        `json:"address" validate:"required,min=2,max=250"`
+		Phone     string        `json:"phone" validate:"required,min=2,max=50"`
+		Email     string        `json:"email" validate:"required,email"`
+		Roles     []model.UserRole `json:"roles" validate:"required,min=1"`
+	}
 
-	// swagger:operation GET /v1/users users listUsers
-	// ---
-	// summary: Returns list of users.
-	// description: Returns list of users. Depending on the user role requesting it, it may return all users for SuperAdmin/Admin users, all company/location users for Company/Location admins, and an error for non-admin users.
-	// parameters:
-	// - name: limit
-	//   in: query
-	//   description: number of results
-	//   type: int
-	//   required: false
-	// - name: page
-	//   in: query
-	//   description: page number
-	//   type: int
-	//   required: false
-	// responses:
-	//   "200":
-	//     "$ref": "#/responses/userListResp"
-	//   "400":
-	//     "$ref": "#/responses/errMsg"
-	//   "401":
-	//     "$ref": "#/responses/err"
-	//   "403":
-	//     "$ref": "#/responses/err"
-	//   "500":
-	//     "$ref": "#/responses/err"
-	ur.GET("", h.list)
-
-	// swagger:operation GET /v1/users/{id} users getUser
-	// ---
-	// summary: Returns a single user.
-	// description: Returns a single user by its ID.
-	// parameters:
-	// - name: id
-	//   in: path
-	//   description: id of user
-	//   type: int
-	//   required: true
-	// responses:
-	//   "200":
-	//     "$ref": "#/responses/userResp"
-	//   "400":
-	//     "$ref": "#/responses/err"
-	//   "401":
-	//     "$ref": "#/responses/err"
-	//   "403":
-	//     "$ref": "#/responses/err"
-	//   "404":
-	//     "$ref": "#/responses/err"
-	//   "500":
-	//     "$ref": "#/responses/err"
-	ur.GET("/:id", h.view)
-
-	// swagger:operation PATCH /v1/users/{id} users userUpdate
-	// ---
-	// summary: Updates user's contact information
-	// description: Updates user's contact information -> first name, last name, mobile, phone, address.
-	// parameters:
-	// - name: id
-	//   in: path
-	//   description: id of user
-	//   type: int
-	//   required: true
-	// - name: request
-	//   in: body
-	//   description: Request body
-	//   required: true
-	//   schema:
-	//     "$ref": "#/definitions/userUpdate"
-	// responses:
-	//   "200":
-	//     "$ref": "#/responses/userResp"
-	//   "400":
-	//     "$ref": "#/responses/errMsg"
-	//   "401":
-	//     "$ref": "#/responses/err"
-	//   "403":
-	//     "$ref": "#/responses/err"
-	//   "500":
-	//     "$ref": "#/responses/err"
-	ur.PATCH("/:id", h.update)
-
-	// swagger:operation DELETE /v1/users/{id} users userDelete
-	// ---
-	// summary: Deletes a user
-	// description: Deletes a user with requested ID.
-	// parameters:
-	// - name: id
-	//   in: path
-	//   description: id of user
-	//   type: int
-	//   required: true
-	// responses:
-	//   "200":
-	//     "$ref": "#/responses/ok"
-	//   "400":
-	//     "$ref": "#/responses/err"
-	//   "401":
-	//     "$ref": "#/responses/err"
-	//   "403":
-	//     "$ref": "#/responses/err"
-	//   "500":
-	//     "$ref": "#/responses/err"
-	ur.DELETE("/:id", h.delete)
-}
-
-// Custom errors
-var (
-	ErrPasswordsNotMaching = echo.NewHTTPError(http.StatusBadRequest, "passwords do not match")
+	// Change password request
+	changePassword struct {
+		OldPassword string `json:"old_password" validate:"required"`
+		NewPassword string `json:"new_password" validate:"required,max=250"`
+	}
 )
 
-// User create request
-// swagger:model userCreate
-type createReq struct {
-	FirstName       string `json:"first_name" validate:"required"`
-	LastName        string `json:"last_name" validate:"required"`
-	Username        string `json:"username" validate:"required,min=3,alphanum"`
-	Password        string `json:"password" validate:"required,min=8"`
-	PasswordConfirm string `json:"password_confirm" validate:"required"`
-	Email           string `json:"email" validate:"required,email"`
-
-	CompanyID  int              `json:"company_id" validate:"required"`
-	LocationID int              `json:"location_id" validate:"required"`
-	RoleID     gorsk.AccessRole `json:"role_id" validate:"required"`
+// H represents user http transport service
+type H struct {
+	svc    service.Service
+	sec    service.Auth
+	log    *zlog.Logger
+	config *config.Config
 }
 
-func (h HTTP) create(c echo.Context) error {
-	r := new(createReq)
-
-	if err := c.Bind(r); err != nil {
-
-		return err
-	}
-
-	if r.Password != r.PasswordConfirm {
-		return ErrPasswordsNotMaching
-	}
-
-	if r.RoleID < gorsk.SuperAdminRole || r.RoleID > gorsk.UserRole {
-		return gorsk.ErrBadRequest
-	}
-
-	usr, err := h.svc.Create(c, gorsk.User{
-		Username:   r.Username,
-		Password:   r.Password,
-		Email:      r.Email,
-		FirstName:  r.FirstName,
-		LastName:   r.LastName,
-		CompanyID:  r.CompanyID,
-		LocationID: r.LocationID,
-		RoleID:     r.RoleID,
-	})
-
-	if err != nil {
-		return err
-	}
-
-	return c.JSON(http.StatusOK, usr)
+// NewHTTP creates new user http transport service
+func NewHTTP(svc service.Service, sec service.Auth, log *zlog.Logger, cfg *config.Config) *H {
+	return &H{svc: svc, sec: sec, log: log, config: cfg}
 }
 
-type listResponse struct {
-	Users []gorsk.User `json:"users"`
-	Page  int          `json:"page"`
-}
+// Create creates a new user account
+func (h *H) Create(c echo.Context) error {
+	req := new(create)
 
-func (h HTTP) list(c echo.Context) error {
-	var req gorsk.PaginationReq
-	if err := c.Bind(&req); err != nil {
-		return err
-	}
-
-	result, err := h.svc.List(c, req.Transform())
-
-	if err != nil {
-		return err
-	}
-
-	return c.JSON(http.StatusOK, listResponse{result, req.Page})
-}
-
-func (h HTTP) view(c echo.Context) error {
-	id, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
-		return gorsk.ErrBadRequest
-	}
-
-	result, err := h.svc.View(c, id)
-	if err != nil {
-		return err
-	}
-
-	return c.JSON(http.StatusOK, result)
-}
-
-// User update request
-// swagger:model userUpdate
-type updateReq struct {
-	ID        int    `json:"-"`
-	FirstName string `json:"first_name,omitempty" validate:"omitempty,min=2"`
-	LastName  string `json:"last_name,omitempty" validate:"omitempty,min=2"`
-	Mobile    string `json:"mobile,omitempty"`
-	Phone     string `json:"phone,omitempty"`
-	Address   string `json:"address,omitempty"`
-}
-
-func (h HTTP) update(c echo.Context) error {
-	id, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
-		return gorsk.ErrBadRequest
-	}
-
-	req := new(updateReq)
 	if err := c.Bind(req); err != nil {
-		return err
+		return c.JSON(http.StatusBadRequest, zlog.Error{Message: err.Error()})
 	}
 
-	usr, err := h.svc.Update(c, user.Update{
-		ID:        id,
+	if err := c.Validate(req); err != nil {
+		return c.JSON(http.StatusBadRequest, zlog.Error{Message: err.Error()})
+	}
+
+	if len(req.Password) < h.config.App.MinPasswordLength {
+		return c.JSON(http.StatusBadRequest, zlog.Error{Message: fmt.Sprintf("password must be at least %d characters long", h.config.App.MinPasswordLength)})
+	}
+
+	id, err := h.svc.Create(c, model.User{
+		Username:  req.Username,
+		Password:  req.Password,
 		FirstName: req.FirstName,
 		LastName:  req.LastName,
-		Mobile:    req.Mobile,
-		Phone:     req.Phone,
 		Address:   req.Address,
+		Phone:     req.Phone,
+		Email:     req.Email,
+		Roles:     req.Roles,
 	})
 
 	if err != nil {
-		return err
+		return c.JSON(http.StatusInternalServerError, zlog.Error{Message: err.Error()})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{"id": id})
+}
+
+// List returns list of users
+func (h *H) List(c echo.Context) error {
+	users, err := h.svc.List(c)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, zlog.Error{Message: err.Error()})
+	}
+
+	return c.JSON(http.StatusOK, users)
+}
+
+// View returns a user's details
+func (h *H) View(c echo.Context) error {
+	id, err := h.svc.View(c, c.Param("id"))
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, zlog.Error{Message: err.Error()})
+	}
+
+	return c.JSON(http.StatusOK, id)
+}
+
+// Delete deletes a user
+func (h *H) Delete(c echo.Context) error {
+	if err := h.svc.Delete(c, c.Param("id")); err != nil {
+		return c.JSON(http.StatusInternalServerError, zlog.Error{Message: err.Error()})
+	}
+	return c.NoContent(http.StatusOK)
+}
+
+// Update updates user's contact information
+func (h *H) Update(c echo.Context) error {
+	req := new(update)
+
+	if err := c.Bind(req); err != nil {
+		return c.JSON(http.StatusBadRequest, zlog.Error{Message: err.Error()})
+	}
+
+	if err := c.Validate(req); err != nil {
+		return c.JSON(http.StatusBadRequest, zlog.Error{Message: err.Error()})
+	}
+
+	usr, err := h.svc.Update(c, model.User{
+		ID:        req.ID,
+		FirstName: req.FirstName,
+		LastName:  req.LastName,
+		Address:   req.Address,
+		Phone:     req.Phone,
+		Email:     req.Email,
+		Roles:     req.Roles,
+	})
+
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, zlog.Error{Message: err.Error()})
 	}
 
 	return c.JSON(http.StatusOK, usr)
 }
 
-func (h HTTP) delete(c echo.Context) error {
-	id, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
-		return gorsk.ErrBadRequest
+// ChangePassword changes user's password
+func (h *H) ChangePassword(c echo.Context) error {
+	req := new(changePassword)
+
+	if err := c.Bind(req); err != nil {
+		return c.JSON(http.StatusBadRequest, zlog.Error{Message: err.Error()})
 	}
 
-	if err := h.svc.Delete(c, id); err != nil {
-		return err
+	if err := c.Validate(req); err != nil {
+		return c.JSON(http.StatusBadRequest, zlog.Error{Message: err.Error()})
+	}
+
+	if len(req.NewPassword) < h.config.App.MinPasswordLength {
+		return c.JSON(http.StatusBadRequest, zlog.Error{Message: fmt.Sprintf("new password must be at least %d characters long", h.config.App.MinPasswordLength)})
+	}
+
+	usr := c.Get(middleware.UserKey).(*model.User)
+
+	if err := h.svc.ChangePassword(c, usr.ID, req.OldPassword, req.NewPassword);
+		err != nil {
+		return c.JSON(http.StatusInternalServerError, zlog.Error{Message: err.Error()})
 	}
 
 	return c.NoContent(http.StatusOK)

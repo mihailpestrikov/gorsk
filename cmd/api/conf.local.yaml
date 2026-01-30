@@ -1,20 +1,25 @@
-database:
-  log_queries: true
-  timeout_seconds: 5
+app:
+  environment: dev
+  min_password_length: 8
 
-server:
-  port: :8080
-  debug: true
-  read_timeout_seconds: 10
-  write_timeout_seconds: 5
+db:
+  dialect: postgres
+  url: "postgres://admin:admin@localhost:5432/gorsk?sslmode=disable"
+  migration_url: "file://database/migrations"
+  max_open_conns: 10
+  max_idle_conns: 5
+  conn_max_lifetime: 300
 
 jwt:
-  duration_minutes: 15
-  refresh_duration_minutes: 15
-  max_refresh_minutes: 1440
-  signing_algorithm: HS256
-  min_secret_length: 64
+  secret: "gorsk_secret"
+  duration: 10
+  refresh: 1
+  refresh_time: 20
+  signing_method: HS256
 
-application:
-  min_password_strength: 1
-  swagger_ui_path: assets/swaggerui
+mail:
+  host: ""
+  port: ""
+  user: ""
+  password: ""
+  from: ""
