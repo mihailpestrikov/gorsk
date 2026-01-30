@@ -1,68 +1,67 @@
 package server
 
 import (
-	"context"
 	"net/http"
-	"os"
-	"os/signal"
 	"time"
 
-	"github.com/go-playground/validator"
-	"github.com/labstack/echo/middleware"
-	"github.com/ribice/gorsk/pkg/utl/middleware/secure"
+	"github.com/rs/cors"
+	"github.com/urfave/negroni"
 
-	"github.com/labstack/echo"
+	"app/pkg/utl/config" // Assuming this path based on project structure
+	"app/pkg/utl/middleware" // Import the new middleware package
+	"app/pkg/utl/zlog"   // Assuming this path based on project structure
 )
 
-// New instantates new Echo server
-func New() *echo.Echo {
-	e := echo.New()
-	e.Use(middleware.Logger(), middleware.Recover(),
-		secure.CORS(), secure.Headers())
-	e.GET("/", healthCheck)
-	e.Validator = &CustomValidator{V: validator.New()}
-	custErr := &customErrHandler{e: e}
-	e.HTTPErrorHandler = custErr.handler
-	e.Binder = &CustomBinder{b: &echo.DefaultBinder{}}
-	return e
+// Server holds common server functionalities and dependencies.
+type Server struct {
+	Config *config.Config
+	Logger *zlog.Logger
 }
 
-func healthCheck(c echo.Context) error {
-	return c.JSON(http.StatusOK, "OK")
-}
-
-// Config represents server specific config
-type Config struct {
-	Port                string
-	ReadTimeoutSeconds  int
-	WriteTimeoutSeconds int
-	Debug               bool
-}
-
-// Start starts echo server
-func Start(e *echo.Echo, cfg *Config) {
-	s := &http.Server{
-		Addr:         cfg.Port,
-		ReadTimeout:  time.Duration(cfg.ReadTimeoutSeconds) * time.Second,
-		WriteTimeout: time.Duration(cfg.WriteTimeoutSeconds) * time.Second,
+// New creates a new server instance with the given configuration and logger.
+func New(cfg *config.Config, logger *zlog.Logger) *Server {
+	return &Server{
+		Config: cfg,
+		Logger: logger,
 	}
-	e.Debug = cfg.Debug
+}
 
-	// Start server
-	go func() {
-		if err := e.StartServer(s); err != nil {
-			e.Logger.Info("Shutting down the server")
-		}
-	}()
+// Start sets up the negroni middleware chain and starts the HTTP server.
+// It expects a configured http.Handler (typically a router like Mux or Chi).
+func (s *Server) Start(router http.Handler) error {
+	n := negroni.New()
 
-	// Wait for interrupt signal to gracefully shutdown the server with
-	// a timeout of 10 seconds.
-	quit := make(chan os.Signal)
-	signal.Notify(quit, os.Interrupt)
-	<-quit
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := e.Shutdown(ctx); err != nil {
-		e.Logger.Fatal(err)
+	// Standard middlewares
+	n.Use(negroni.NewRecovery()) // Catches panics and returns a 500 error
+	n.Use(middleware.RequestID()) // Add Request ID middleware early in the chain
+	n.Use(negroni.NewLogger())   // Logs requests; should be after RequestID to include it in logs
+
+	// CORS middleware configuration
+	n.Use(cors.New(cors.Options{
+		AllowedOrigins: []string{"*"}, // Adjust as per your security requirements
+		AllowedMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowedHeaders: []string{
+			"Authorization",
+			"Content-Type",
+			middleware.HeaderXRequestID, // Allow X-Request-ID from client
+		},
+		ExposedHeaders: []string{
+			middleware.HeaderXRequestID, // Expose X-Request-ID to clients
+		},
+		Debug: s.Config.Server.Debug, // Assuming Config.Server.Debug exists
+	}))
+
+	// The main application router is the final handler
+	n.UseHandler(router)
+
+	srv := &http.Server{
+		Addr:         s.Config.Server.Port, // Assuming Config.Server.Port exists
+		Handler:      n,
+		ReadTimeout:  time.Duration(s.Config.Server.ReadTimeout) * time.Second,  // Assuming Config.Server.ReadTimeout exists
+		WriteTimeout: time.Duration(s.Config.Server.WriteTimeout) * time.Second, // Assuming Config.Server.WriteTimeout exists
+		IdleTimeout:  time.Duration(s.Config.Server.IdleTimeout) * time.Second,  // Assuming Config.Server.IdleTimeout exists
 	}
+
+	s.Logger.Info().Msgf("Server listening on port %s", s.Config.Server.Port)
+	return srv.ListenAndServe()
 }
