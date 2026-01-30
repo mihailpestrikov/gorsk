@@ -1,68 +1,77 @@
 package server
 
 import (
-	"context"
 	"net/http"
-	"os"
-	"os/signal"
-	"time"
-
-	"github.com/go-playground/validator"
-	"github.com/labstack/echo/middleware"
-	"github.com/ribice/gorsk/pkg/utl/middleware/secure"
 
 	"github.com/labstack/echo"
+	"github.com/labstack/echo/middleware"
+	"github.com/ribice/gorsk/pkg/utl/config"
+	"github.com/rs/zerolog"
+	gopkg.in/go-playground/validator.v8"
 )
 
-// New instantates new Echo server
-func New() *echo.Echo {
+// Server contains server configurations
+type Server struct {
+	*echo.Echo
+}
+
+// New returns new HTTP server
+func New(cfg *config.Config, logger *zerolog.Logger) *Server {
 	e := echo.New()
-	e.Use(middleware.Logger(), middleware.Recover(),
-		secure.CORS(), secure.Headers())
-	e.GET("/", healthCheck)
-	e.Validator = &CustomValidator{V: validator.New()}
-	custErr := &customErrHandler{e: e}
-	e.HTTPErrorHandler = custErr.handler
-	e.Binder = &CustomBinder{b: &echo.DefaultBinder{}}
-	return e
+	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
+		Output: logger,
+	}))
+	e.Use(middleware.Secure())
+	e.Use(middleware.CORS())
+
+	v := validator.New()
+	v.RegisterValidation("min_password", func(fl validator.FieldLevel) bool {
+		return len(fl.Field().String()) >= cfg.App.MinPasswordLength
+	})
+	e.Validator = &customValidator{validator: v}
+	e.HTTPErrorHandler = newHTTPError(logger)
+
+	return &Server{e}
 }
 
-func healthCheck(c echo.Context) error {
-	return c.JSON(http.StatusOK, "OK")
+type customValidator struct {
+	validator *validator.Validate
 }
 
-// Config represents server specific config
-type Config struct {
-	Port                string
-	ReadTimeoutSeconds  int
-	WriteTimeoutSeconds int
-	Debug               bool
+// Validate validates all fields in a struct
+func (cv *customValidator) Validate(i interface{}) error {
+	return cv.validator.Struct(i)
 }
 
-// Start starts echo server
-func Start(e *echo.Echo, cfg *Config) {
-	s := &http.Server{
-		Addr:         cfg.Port,
-		ReadTimeout:  time.Duration(cfg.ReadTimeoutSeconds) * time.Second,
-		WriteTimeout: time.Duration(cfg.WriteTimeoutSeconds) * time.Second,
-	}
-	e.Debug = cfg.Debug
-
-	// Start server
-	go func() {
-		if err := e.StartServer(s); err != nil {
-			e.Logger.Info("Shutting down the server")
+func newHTTPError(logger *zerolog.Logger) echo.HTTPErrorHandler {
+	return func(err error, c echo.Context) {
+		reqID := c.Request().Header.Get(echo.HeaderXRequestID)
+		var customErr *echo.HTTPError
+		if he, ok := err.(*echo.HTTPError); ok {
+			customErr = he
+		} else if e, ok := err.(validator.ValidationErrors); ok {
+			customErr = echo.NewHTTPError(http.StatusBadRequest, e.Error())
+		} else {
+			customErr = echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
-	}()
 
-	// Wait for interrupt signal to gracefully shutdown the server with
-	// a timeout of 10 seconds.
-	quit := make(chan os.Signal)
-	signal.Notify(quit, os.Interrupt)
-	<-quit
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := e.Shutdown(ctx); err != nil {
-		e.Logger.Fatal(err)
+		if c.Response().Committed {
+			return
+		}
+
+		if customErr.Code >= 500 {
+			logger.Err(customErr).Str("request_id", reqID).Send()
+		} else if customErr.Code >= 400 {
+			logger.Warn().Err(customErr).Str("request_id", reqID).Send()
+		}
+
+		if c.Request().Method == http.MethodHead {
+			err = c.NoContent(customErr.Code)
+		} else {
+			err = c.JSON(customErr.Code, customErr)
+		}
+		if err != nil {
+			logger.Err(err).Str("request_id", reqID).Msg("http error handler failed")
+		}
 	}
 }

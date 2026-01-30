@@ -1,20 +1,22 @@
-database:
-  log_queries: true
-  timeout_seconds: 5
-
 server:
-  port: :8080
+  port: ":8080"
   debug: true
-  read_timeout_seconds: 10
-  write_timeout_seconds: 5
+  read_timeout: 5
+  write_timeout: 5
+  idle_timeout: 5
+
+postgres:
+  host: "localhost"
+  port: "5432"
+  user: "gorsk"
+  password: "gorsk"
+  db_name: "gorsk"
+  ssl_mode: "disable"
 
 jwt:
-  duration_minutes: 15
-  refresh_duration_minutes: 15
-  max_refresh_minutes: 1440
-  signing_algorithm: HS256
-  min_secret_length: 64
+  secret: "some_secret"
+  signing_algorithm: "HS256"
+  duration: 10
 
-application:
-  min_password_strength: 1
-  swagger_ui_path: assets/swaggerui
+app:
+  min_password_length: 8
