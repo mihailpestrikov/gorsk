@@ -1,96 +1,79 @@
-// Copyright 2017 Emir Ribic. All rights reserved.
-// Use of this source code is governed by an MIT-style
-// license that can be found in the LICENSE file.
-
-// GORSK - Go(lang) restful starter kit
-//
-// API Docs for GORSK v1
-//
-//		 Terms Of Service:  N/A
-//	    Schemes: http
-//	    Version: 2.0.0
-//	    License: MIT http://opensource.org/licenses/MIT
-//	    Contact: Emir Ribic <ribice@gmail.com> https://ribice.ba
-//	    Host: localhost:8080
-//
-//	    Consumes:
-//	    - application/json
-//
-//	    Produces:
-//	    - application/json
-//
-//	    Security:
-//	    - bearer: []
-//
-//	    SecurityDefinitions:
-//	    bearer:
-//	         type: apiKey
-//	         name: Authorization
-//	         in: header
-//
-// swagger:meta
 package api
 
 import (
-	"crypto/sha1"
-	"os"
+	"net/http"
 
-	"github.com/ribice/gorsk/pkg/utl/zlog"
-
-	"github.com/ribice/gorsk/pkg/api/auth"
-	al "github.com/ribice/gorsk/pkg/api/auth/logging"
-	at "github.com/ribice/gorsk/pkg/api/auth/transport"
-	"github.com/ribice/gorsk/pkg/api/password"
-	pl "github.com/ribice/gorsk/pkg/api/password/logging"
-	pt "github.com/ribice/gorsk/pkg/api/password/transport"
-	"github.com/ribice/gorsk/pkg/api/user"
-	ul "github.com/ribice/gorsk/pkg/api/user/logging"
-	ut "github.com/ribice/gorsk/pkg/api/user/transport"
-
+	"github.com/go-pg/pg/v9"
+	"github.com/labstack/echo/v4"
+	apiAuth "github.com/ribice/gorsk/pkg/api/auth"
+	apiUser "github.com/ribice/gorsk/pkg/api/user"
 	"github.com/ribice/gorsk/pkg/utl/config"
 	"github.com/ribice/gorsk/pkg/utl/jwt"
-	authMw "github.com/ribice/gorsk/pkg/utl/middleware/auth"
-	"github.com/ribice/gorsk/pkg/utl/postgres"
+	"github.com/ribice/gorsk/pkg/utl/middleware"
 	"github.com/ribice/gorsk/pkg/utl/rbac"
 	"github.com/ribice/gorsk/pkg/utl/secure"
 	"github.com/ribice/gorsk/pkg/utl/server"
+	"github.com/rs/zerolog"
 )
 
-// Start starts the API service
-func Start(cfg *config.Configuration) error {
-	db, err := postgres.New(os.Getenv("DATABASE_URL"), cfg.DB.Timeout, cfg.DB.LogQueries)
-	if err != nil {
-		return err
-	}
+// API groups all application services
+type API struct {
+	Auth apiAuth.Service
+	User apiUser.Service
+}
 
-	sec := secure.New(cfg.App.MinPasswordStr, sha1.New())
-	rbac := rbac.Service{}
-	jwt, err := jwt.New(cfg.JWT.SigningAlgorithm, os.Getenv("JWT_SECRET"), cfg.JWT.DurationMinutes, cfg.JWT.MinSecretLength)
-	if err != nil {
-		return err
-	}
+// New creates new api
+func New(cfg *config.Config, db *pg.DB, rbac RBAC, sec Secure, jwt JWT, log *zerolog.Logger) (*echo.Echo, error) {
+	srv := server.New(cfg, log)
+	authMiddleware := middleware.JWT(jwt.Secret())
 
-	log := zlog.New()
+	// Public routes
+	srv.Echo.GET("/health", srv.Health())
+	srv.Echo.POST("/login", apiAuth.Login(cfg, jwt, srv, db, sec, log))
+	srv.Echo.GET("/refresh/:token", apiAuth.Refresh(cfg, jwt, srv, db, log))
 
-	e := server.New()
-	e.Static("/swaggerui", cfg.App.SwaggerUIPath)
+	// Private routes
+	v1 := srv.Echo.Group("/v1", authMiddleware)
 
-	authMiddleware := authMw.Middleware(jwt)
+	// Auth
+	v1.PATCH("/password/:id", apiAuth.ChangePassword(cfg, srv, db, sec, log))
 
-	at.NewHTTP(al.New(auth.Initialize(db, jwt, sec, rbac), log), e, authMiddleware)
+	// Users
+	v1.POST("/users", apiUser.Create(cfg, srv, db, rbac, sec, log))
+	v1.GET("/users", apiUser.List(cfg, srv, db, rbac, log))
+	v1.GET("/users/:id", apiUser.View(cfg, srv, db, rbac, log))
+	v1.PATCH("/users/:id", apiUser.Update(cfg, srv, db, rbac, log))
+	v1.DELETE("/users/:id", apiUser.Delete(cfg, srv, db, rbac, log))
 
-	v1 := e.Group("/v1")
-	v1.Use(authMiddleware)
-
-	ut.NewHTTP(ul.New(user.Initialize(db, rbac, sec), log), v1)
-	pt.NewHTTP(pl.New(password.Initialize(db, rbac, sec), log), v1)
-
-	server.Start(e, &server.Config{
-		Port:                cfg.Server.Port,
-		ReadTimeoutSeconds:  cfg.Server.ReadTimeout,
-		WriteTimeoutSeconds: cfg.Server.WriteTimeout,
-		Debug:               cfg.Server.Debug,
+	//Swagger
+	srv.Echo.Static("/swaggerui", "./assets/swaggerui")
+	srv.Echo.GET("/swagger.json", func(c echo.Context) error {
+		return c.File("assets/swaggerui/swagger.json")
 	})
 
-	return nil
+	return srv.Echo, nil
 }
+
+type (
+	// JWT represents JWT interface
+	JWT interface {
+		GenerateToken(apiAuth.User) (string, error)
+		ParseToken(string) (*jwt.AuthClaims, error)
+		Secret() string
+	}
+
+	// RBAC represents RBAC interface
+	RBAC interface {
+		UserHasPermission(jwt.AuthClaims, string, string) error
+		UserHasRole(jwt.AuthClaims, string) error
+		EnforceUser(jwt.AuthClaims, string, ...string) error
+		Enforce(jwt.AuthClaims, string, string, ...string) error
+		EnforceErr(jwt.AuthClaims, string, string, ...string) error
+	}
+
+	// Secure represents security interface
+	Secure interface {
+		Hash(string) (string, error)
+		CompareHash(string, string) error
+	}
+)
