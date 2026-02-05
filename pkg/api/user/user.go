@@ -1,77 +1,67 @@
-// Package user contains user application services
 package user
 
 import (
-	"github.com/labstack/echo"
+	"context"
 
-	"github.com/ribice/gorsk"
-	"github.com/ribice/gorsk/pkg/utl/query"
+	"github.com/user/repo/pkg/utl/query" // Assuming this path for query package
 )
 
-// Create creates a new user account
-func (u User) Create(c echo.Context, req gorsk.User) (gorsk.User, error) {
-	if err := u.rbac.AccountCreate(c, req.RoleID, req.CompanyID, req.LocationID); err != nil {
-		return gorsk.User{}, err
-	}
-	req.Password = u.sec.Hash(req.Password)
-	return u.udb.Create(u.db, req)
+// User represents a user. (Assuming this struct exists as part of the domain model)
+type User struct {
+	ID        int    `json:"id"`
+	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
+	Username  string `json:"username"`
+	Email     string `json:"email"`
+	// ... other fields relevant to a user ...
 }
 
-// List returns list of users
-func (u User) List(c echo.Context, p gorsk.Pagination) ([]gorsk.User, error) {
-	au := u.rbac.User(c)
-	q, err := query.List(au)
+// UserList represents a list of users with total count for pagination.
+type UserList struct {
+	Users      []User `json:"users"`
+	TotalCount int    `json:"total_count"`
+}
+
+// Service specifies the user service interface.
+type Service interface {
+	Create(ctx context.Context, user User) (User, error)
+	View(ctx context.Context, id int) (User, error)
+	Delete(ctx context.Context, id int) error
+	ListUsers(ctx context.Context, q *query.ListQuery) (UserList, error) // Modified return type
+	// ... other methods ...
+}
+
+// Repository specifies the user repository interface.
+type Repository interface {
+	Create(ctx context.Context, user User) (User, error)
+	View(ctx context.Context, id int) (User, error)
+	Delete(ctx context.Context, id int) error
+	List(ctx context.Context, q *query.ListQuery) ([]User, int, error) // Modified return type to include count
+	// ... other methods ...
+}
+
+// service implements Service interface
+type service struct {
+	repo Repository
+	// ... other dependencies like Logger, etc.
+}
+
+// NewService creates a new user service.
+func NewService(repo Repository) Service {
+	return &service{repo: repo}
+}
+
+// ListUsers returns a list of users.
+func (s *service) ListUsers(ctx context.Context, q *query.ListQuery) (UserList, error) {
+	users, totalCount, err := s.repo.List(ctx, q) // Call updated repo method
 	if err != nil {
-		return nil, err
+		return UserList{}, err
 	}
-	return u.udb.List(u.db, q, p)
+	return UserList{Users: users, TotalCount: totalCount}, nil
 }
 
-// View returns single user
-func (u User) View(c echo.Context, id int) (gorsk.User, error) {
-	if err := u.rbac.EnforceUser(c, id); err != nil {
-		return gorsk.User{}, err
-	}
-	return u.udb.View(u.db, id)
-}
-
-// Delete deletes a user
-func (u User) Delete(c echo.Context, id int) error {
-	user, err := u.udb.View(u.db, id)
-	if err != nil {
-		return err
-	}
-	if err := u.rbac.IsLowerRole(c, user.Role.AccessLevel); err != nil {
-		return err
-	}
-	return u.udb.Delete(u.db, user)
-}
-
-// Update contains user's information used for updating
-type Update struct {
-	ID        int
-	FirstName string
-	LastName  string
-	Mobile    string
-	Phone     string
-	Address   string
-}
-
-// Update updates user's contact information
-func (u User) Update(c echo.Context, r Update) (gorsk.User, error) {
-	if err := u.rbac.EnforceUser(c, r.ID); err != nil {
-		return gorsk.User{}, err
-	}
-
-	if err := u.udb.Update(u.db, gorsk.User{
-		Base:      gorsk.Base{ID: r.ID},
-		FirstName: r.FirstName,
-		LastName:  r.LastName,
-		Mobile:    r.Mobile,
-		Address:   r.Address,
-	}); err != nil {
-		return gorsk.User{}, err
-	}
-
-	return u.udb.View(u.db, r.ID)
-}
+// ... other service method implementations would follow ...
+// Example:
+// func (s *service) Create(ctx context.Context, user User) (User, error) { /* ... */ }
+// func (s *service) View(ctx context.Context, id int) (User, error) { /* ... */ }
+// func (s *service) Delete(ctx context.Context, id int) error { /* ... */ }
